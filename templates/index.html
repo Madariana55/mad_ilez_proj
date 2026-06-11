@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCR PDF → SQL</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --card: #22263a;
+    --accent: #6c63ff; --accent2: #a78bfa;
+    --success: #22d3a5; --warn: #f59e0b; --err: #f87171;
+    --text: #e2e8f0; --muted: #8892a4;
+    --border: #2d3148; --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  /* ── HEADER ── */
+  header {
+    background: linear-gradient(135deg, #1a1d27 0%, #16192a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 40px; display: flex; align-items: center; gap: 16px;
+  }
+  header .logo { font-size: 1.6rem; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header .sub { color: var(--muted); font-size: .85rem; }
+
+  /* ── LAYOUT ── */
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media(max-width:760px){ .grid{ grid-template-columns:1fr; } }
+
+  /* ── CARDS ── */
+  .card { background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; }
+  .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px; }
+
+  /* ── UPLOAD ZONE ── */
+  #drop-zone {
+    border: 2px dashed var(--border); border-radius: 10px;
+    padding: 40px 20px; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  #drop-zone:hover, #drop-zone.dragover {
+    border-color: var(--accent); background: rgba(108,99,255,.06);
+  }
+  #drop-zone .icon { font-size: 2.4rem; margin-bottom: 10px; }
+  #drop-zone p { color: var(--muted); font-size: .9rem; margin-top: 6px; }
+  #file-input { display: none; }
+
+  /* ── FORM CONTROLS ── */
+  label { display: block; font-size: .82rem; color: var(--muted); margin-bottom: 5px; }
+  select, input[type=text] {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 9px 12px;
+    font-size: .9rem; outline: none; transition: border-color .2s;
+  }
+  select:focus, input[type=text]:focus { border-color: var(--accent); }
+  .form-row { margin-bottom: 14px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 20px; border-radius: 8px; border: none;
+    font-size: .9rem; font-weight: 600; cursor: pointer; transition: opacity .15s;
+  }
+  .btn:hover { opacity: .88; }
+  .btn-primary { background: var(--accent); color: #fff; width: 100%; justify-content: center; margin-top: 8px; }
+  .btn-sm { padding: 6px 14px; font-size: .78rem; }
+  .btn-danger { background: var(--err); color: #fff; }
+  .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+  /* ── SEARCH ── */
+  .search-row { display: flex; gap: 10px; }
+  .search-row input { flex: 1; }
+
+  /* ── PROGRESS ── */
+  .progress-wrap { margin-top: 14px; display: none; }
+  .progress-bar-bg { height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 99px; transition: width .4s; }
+  .progress-label { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+
+  /* ── BADGES ── */
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 99px;
+    font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge-pending    { background: #1e293b; color: var(--muted); }
+  .badge-processing { background: #1c2a4a; color: #60a5fa; }
+  .badge-done       { background: #0d2e27; color: var(--success); }
+  .badge-error      { background: #2e1515; color: var(--err); }
+
+  /* ── DOC LIST ── */
+  #doc-list { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow-y: auto; }
+  .doc-item {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .doc-item:hover { border-color: var(--accent); background: #1f2236; }
+  .doc-item .icon { font-size: 1.4rem; flex-shrink: 0; }
+  .doc-item .info { flex: 1; min-width: 0; }
+  .doc-item .name { font-weight: 600; font-size: .9rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-item .meta { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+  .doc-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* ── SEARCH RESULTS ── */
+  #search-results { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .search-hit {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; font-size: .85rem;
+  }
+  .search-hit .hit-meta { color: var(--accent2); font-size: .75rem; margin-bottom: 5px; font-weight: 600; }
+  .search-hit .hit-ctx { color: var(--muted); line-height: 1.6; }
+
+  /* ── STATS ── */
+  .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 10px; }
+  .stat-box { background: var(--surface); border-radius: 8px; padding: 12px; text-align: center; }
+  .stat-box .val { font-size: 1.4rem; font-weight: 800; color: var(--accent2); }
+  .stat-box .lbl { font-size: .72rem; color: var(--muted); margin-top: 3px; }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 20px; font-size: .88rem;
+    display: none; z-index: 999; max-width: 320px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+  #toast.show { display: block; }
+  #toast.ok  { border-color: var(--success); }
+  #toast.err { border-color: var(--err); }
+
+  /* ── EMPTY ── */
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">📄 OCR PDF → SQL</div>
+    <div class="sub">Импорт текста из PDF с использованием Tesseract OCR и хранением в SQLite</div>
+  </div>
+</header>
+
+<main>
+  <div class="grid">
+
+    <!-- ── ЗАГРУЗКА ── -->
+    <div>
+      <div class="card">
+        <h2>📤 Загрузить PDF</h2>
+        <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <div class="icon">🗂️</div>
+          <strong>Перетащите PDF сюда</strong>
+          <p>или нажмите для выбора файла</p>
+          <p id="file-name" style="margin-top:10px;color:var(--accent2);font-weight:600"></p>
+        </div>
+        <input type="file" id="file-input" accept=".pdf">
+
+        <div style="margin-top:16px">
+          <div class="form-row">
+            <label>Язык OCR</label>
+            <select id="lang-select">
+              <option value="rus+eng">Русский + Английский</option>
+              <option value="rus">Только русский</option>
+              <option value="eng">Только английский</option>
+              <option value="deu">Немецкий</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="uploadFile()">
+            ⚡ Запустить OCR
+          </button>
+        </div>
+
+        <div class="progress-wrap" id="progress-wrap">
+          <div class="progress-bar-bg"><div class="progress-bar" id="progress-bar"></div></div>
+          <div class="progress-label" id="progress-label">Обработка…</div>
+        </div>
+      </div>
+
+      <!-- ── ПОИСК ── -->
+      <div class="card" style="margin-top:20px">
+        <h2>🔍 Поиск по тексту</h2>
+        <div class="search-row">
+          <input type="text" id="search-input" placeholder="Введите запрос…" onkeydown="if(event.key==='Enter')doSearch()">
+          <button class="btn btn-ghost" onclick="doSearch()">Найти</button>
+        </div>
+        <div id="search-results"></div>
+      </div>
+    </div>
+
+    <!-- ── СПИСОК ДОКУМЕНТОВ ── -->
+    <div>
+      <div class="card">
+        <h2>🗄️ Документы в базе <span id="doc-count" style="color:var(--muted);font-weight:400;font-size:.85rem"></span></h2>
+        <div class="stats-row" id="stats-row">
+          <div class="stat-box"><div class="val" id="st-docs">—</div><div class="lbl">документов</div></div>
+          <div class="stat-box"><div class="val" id="st-pages">—</div><div class="lbl">страниц</div></div>
+          <div class="stat-box"><div class="val" id="st-words">—</div><div class="lbl">слов</div></div>
+        </div>
+        <div style="height:14px"></div>
+        <div id="doc-list"><div class="empty">Загружайте PDF-файлы для начала работы</div></div>
+      </div>
+    </div>
+
+  </div><!-- /grid -->
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── State ──
+let selectedFile = null;
+let pollTimer    = null;
+
+// ── Drag & Drop ──
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) setFile(f);
+  else toast('Только PDF-файлы!', 'err');
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+
+function setFile(f) {
+  selectedFile = f;
+  document.getElementById('file-name').textContent = `✓ ${f.name} (${(f.size/1024/1024).toFixed(2)} МБ)`;
+}
+
+// ── Upload ──
+async function uploadFile() {
+  if (!selectedFile) { toast('Выберите файл', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('language', document.getElementById('lang-select').value);
+
+  showProgress('Загрузка файла…', 10);
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Ошибка загрузки');
+    toast(`Документ принят (ID: ${d.doc_id}). Запущен OCR…`, 'ok');
+    showProgress('OCR в процессе…', 40);
+    pollStatus(d.doc_id);
+  } catch (e) {
+    hideProgress();
+    toast(e.message, 'err');
+  }
+}
+
+function pollStatus(docId) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/documents/${docId}/status`);
+      const d = await r.json();
+      if (d.status === 'done') {
+        showProgress('Готово!', 100);
+        setTimeout(hideProgress, 1200);
+        toast(`OCR завершён: ${d.page_count} стр.`, 'ok');
+        loadDocs();
+      } else if (d.status === 'error') {
+        hideProgress();
+        toast('Ошибка OCR: ' + (d.error_msg || ''), 'err');
+      } else {
+        showProgress('OCR в процессе…', 65);
+        pollStatus(docId);
+      }
+    } catch { pollStatus(docId); }
+  }, 2000);
+}
+
+function showProgress(label, pct) {
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('progress-bar').style.width  = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+}
+function hideProgress() {
+  document.getElementById('progress-wrap').style.display = 'none';
+  document.getElementById('progress-bar').style.width = '0%';
+}
+
+// ── Load Documents ──
+async function loadDocs() {
+  const r = await fetch('/api/documents');
+  const docs = await r.json();
+
+  // Stats
+  const totalPages = docs.reduce((s, d) => s + (d.page_count || 0), 0);
+  document.getElementById('st-docs').textContent  = docs.length;
+  document.getElementById('st-pages').textContent = totalPages;
+
+  // Fetch word counts (sum from docs with status=done)
+  let totalWords = 0;
+  for (const d of docs.filter(x => x.status === 'done').slice(0, 10)) {
+    try {
+      const r2 = await fetch(`/api/documents/${d.id}/fulltext`);
+      const ft = await r2.json();
+      totalWords += ft.total_words || 0;
+    } catch {}
+  }
+  document.getElementById('st-words').textContent = totalWords > 999
+    ? (totalWords/1000).toFixed(1) + 'k' : totalWords;
+
+  // List
+  const list = document.getElementById('doc-list');
+  if (!docs.length) {
+    list.innerHTML = '<div class="empty">Загружайте PDF-файлы для начала работы</div>';
+    return;
+  }
+  list.innerHTML = docs.map(d => `
+    <div class="doc-item" onclick="openDoc(${d.id})">
+      <div class="icon">📄</div>
+      <div class="info">
+        <div class="name" title="${d.filename}">${d.filename}</div>
+        <div class="meta">
+          ${d.page_count} стр · ${(d.file_size/1024).toFixed(0)} KB · ${d.language}
+          · <span style="color:var(--muted)">${formatDate(d.created_at)}</span>
+        </div>
+      </div>
+      <div class="actions" onclick="event.stopPropagation()">
+        <span class="badge badge-${d.status}">${statusRu(d.status)}</span>
+        <button class="btn btn-sm btn-danger" onclick="deleteDoc(${d.id})">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'Z');
+  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'});
+}
+function statusRu(s) {
+  return {pending:'ожидание',processing:'обработка',done:'готово',error:'ошибка'}[s] || s;
+}
+
+// ── Open Document ──
+function openDoc(id) {
+  window.location.href = `/document/${id}`;
+}
+
+// ── Delete ──
+async function deleteDoc(id) {
+  if (!confirm('Удалить документ из базы?')) return;
+  await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+  toast('Документ удалён', 'ok');
+  loadDocs();
+}
+
+// ── Search ──
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const r   = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  const res = await r.json();
+  const el  = document.getElementById('search-results');
+  if (!res.results.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:.85rem;margin-top:10px">Ничего не найдено</div>';
+    return;
+  }
+  el.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-top:8px">Найдено: ${res.total}</div>` +
+    res.results.slice(0, 10).map(h => `
+      <div class="search-hit" onclick="openDoc(${h.document_id})" style="cursor:pointer">
+        <div class="hit-meta">Документ #${h.document_id} · Стр. ${h.page_number}</div>
+        <div class="hit-ctx">${h.context}</div>
+      </div>
+    `).join('');
+}
+
+// ── Toast ──
+function toast(msg, type = 'ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className   = `show ${type}`;
+  setTimeout(() => t.className = '', 3500);
+}
+
+// ── Init ──
+loadDocs();
+setInterval(loadDocs, 8000);
+</script>
+</body>
+</html>
